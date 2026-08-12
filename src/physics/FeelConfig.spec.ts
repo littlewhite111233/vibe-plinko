@@ -30,17 +30,30 @@ describe('chargePullRatio', () => {
 });
 
 describe('computeLaunchVelocity', () => {
-  it('returns null for tap pulls and scales quadratically to max', () => {
+  it('returns null for tap pulls and scales to max at full pull', () => {
     expect(computeLaunchVelocity(0)).toBeNull();
     expect(computeLaunchVelocity(0.04)).toBeNull();
+    const min = computeLaunchVelocity(FEEL.launch.minPull);
     const mid = computeLaunchVelocity(0.5);
     const full = computeLaunchVelocity(1);
+    expect(min).not.toBeNull();
     expect(mid).not.toBeNull();
     expect(full).not.toBeNull();
+    expect(Math.abs(min!.vy)).toBeGreaterThan(Math.abs(FEEL.launch.maxVy) * 0.4);
+    expect(Math.abs(min!.vx)).toBeLessThan(Math.abs(full!.vx) * 0.3);
     expect(Math.abs(mid!.vx)).toBeLessThan(Math.abs(full!.vx));
     expect(Math.abs(mid!.vy)).toBeLessThan(Math.abs(full!.vy));
     expect(full!.vx).toBeCloseTo(FEEL.launch.maxVx);
     expect(full!.vy).toBeCloseTo(FEEL.launch.maxVy);
+  });
+
+  it('raises entry height monotonically as pull increases', () => {
+    const minVy = computeLaunchVelocity(FEEL.launch.minPull)!.vy;
+    const midVy = computeLaunchVelocity(0.55)!.vy;
+    const maxVy = computeLaunchVelocity(1)!.vy;
+    expect(minVy).toBeGreaterThan(maxVy);
+    expect(midVy).toBeGreaterThan(maxVy);
+    expect(minVy).toBeGreaterThan(midVy);
   });
 });
 

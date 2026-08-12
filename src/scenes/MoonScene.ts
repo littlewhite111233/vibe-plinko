@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { FEEL, LANE_GUIDE_X, pegFitsInField } from '../physics/FeelConfig';
+import { FEEL, pegFitsInField } from '../physics/FeelConfig';
 import { GameScene } from './GameScene';
 
 export class MoonScene extends GameScene {
@@ -51,77 +51,13 @@ export class MoonScene extends GameScene {
     // Ceiling wall
     this.matter.add.rectangle(240, 154 - 25, 480, 50, { isStatic: true });
 
-    // Lane Guide (right side)
-    const LANE_GUIDE_Y = 350;
-    const LANE_GUIDE_HEIGHT = 734 - LANE_GUIDE_Y;
-    this.add.rectangle(LANE_GUIDE_X, LANE_GUIDE_Y, 4, LANE_GUIDE_HEIGHT, 0x888ea0).setOrigin(0);
-    this.matter.add.rectangle(
-      LANE_GUIDE_X + 2,
-      LANE_GUIDE_Y + LANE_GUIDE_HEIGHT / 2,
-      4,
-      LANE_GUIDE_HEIGHT,
-      { isStatic: true }
-    );
-    this.matter.add.circle(LANE_GUIDE_X + 2, LANE_GUIDE_Y, 2, { isStatic: true, restitution: 0.4 });
-
-    this.addLaneWallBumpers(LANE_GUIDE_Y);
+    // Lane guide + top-right curved deflector (shooter entry track)
+    this.addShooterLaneTop(g);
     this.addLeftWallBumpers();
 
     // Shooter Lane Spring
     this._springGraphics = this.add.graphics();
     this.drawSpring();
-
-    // Solid Curved Deflector Block in top right
-    g.fillStyle(0x1a1e2a);
-    g.beginPath();
-    g.moveTo(380, 154);
-    g.lineTo(470, 154);
-    g.lineTo(470, 260);
-
-    const curve = new Phaser.Curves.QuadraticBezier(
-      new Phaser.Math.Vector2(470, 260),
-      new Phaser.Math.Vector2(460, 180),
-      new Phaser.Math.Vector2(380, 154)
-    );
-    const curvePoints = curve.getPoints(16);
-    curvePoints.forEach((p) => g.lineTo(p.x, p.y));
-
-    g.closePath();
-    g.fillPath();
-
-    g.lineStyle(4, 0x888ea0);
-    g.beginPath();
-    curvePoints.forEach((p, index) => {
-      if (index === 0) g.moveTo(p.x, p.y);
-      else g.lineTo(p.x, p.y);
-    });
-    g.strokePath();
-
-    for (let i = 0; i < curvePoints.length - 1; i++) {
-      const p1 = curvePoints[i];
-      const p2 = curvePoints[i + 1];
-      if (!p1 || !p2) continue;
-
-      const cx = (p1.x + p2.x) / 2;
-      const cy = (p1.y + p2.y) / 2;
-      const angle = Phaser.Math.Angle.Between(p1.x, p1.y, p2.x, p2.y);
-      const length = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
-
-      this.matter.add.rectangle(cx, cy, length, 4, {
-        isStatic: true,
-        angle: angle,
-        restitution: 0.2,
-      });
-
-      this.matter.add.circle(p1.x, p1.y, 2, {
-        isStatic: true,
-        restitution: 0.2,
-      });
-    }
-    const lastP = curvePoints[curvePoints.length - 1];
-    if (lastP) {
-      this.matter.add.circle(lastP.x, lastP.y, 2, { isStatic: true, restitution: 0.2 });
-    }
 
     this._astronautBaseX = 210;
     this._astronaut = this.add.image(this._astronautBaseX, 235, 'astronaut');
@@ -174,7 +110,7 @@ export class MoonScene extends GameScene {
           isStatic: true,
           circleRadius: circleRadius,
           restitution: 0.05,
-          friction: 0.05,
+          friction: FEEL.peg.friction,
           label,
         });
 

@@ -127,87 +127,13 @@ export class GameScene extends Phaser.Scene {
     // Ceiling wall (widen to 50 thick, moved 20px up so the bottom edge sits exactly at 154)
     this.matter.add.rectangle(240, 154 - 25, 480, 50, { isStatic: true });
 
-    // Lane Guide (right side) - start lower at 350 so ball can escape
-    const LANE_GUIDE_Y = 350;
-    const LANE_GUIDE_HEIGHT = 734 - LANE_GUIDE_Y; // 384
-    this.add.rectangle(LANE_GUIDE_X, LANE_GUIDE_Y, 4, LANE_GUIDE_HEIGHT, 0x888ea0).setOrigin(0); // chrome guide wall
-    this.matter.add.rectangle(
-      LANE_GUIDE_X + 2,
-      LANE_GUIDE_Y + LANE_GUIDE_HEIGHT / 2,
-      4,
-      LANE_GUIDE_HEIGHT,
-      { isStatic: true }
-    );
-    this.matter.add.circle(LANE_GUIDE_X + 2, LANE_GUIDE_Y, 2, { isStatic: true, restitution: 0.4 });
-
-    this.addLaneWallBumpers(LANE_GUIDE_Y);
+    // Lane guide + top-right curved deflector (shooter entry track)
+    this.addShooterLaneTop(g);
     this.addLeftWallBumpers();
 
     // Shooter Lane Spring
     this._springGraphics = this.add.graphics();
     this.drawSpring();
-
-    // Solid Curved Deflector Block in top right
-    g.fillStyle(0x1a1e2a); // gunmetal cabinet color
-    g.beginPath();
-    g.moveTo(380, 154); // start on ceiling
-    g.lineTo(470, 154); // over to corner
-    g.lineTo(470, 260); // down right wall
-
-    // Smooth curve back up
-    const curve = new Phaser.Curves.QuadraticBezier(
-      new Phaser.Math.Vector2(470, 260), // Start (bottom right)
-      new Phaser.Math.Vector2(460, 180), // Control point
-      new Phaser.Math.Vector2(380, 154) // End (ceiling)
-    );
-    const curvePoints = curve.getPoints(16);
-    curvePoints.forEach((p) => g.lineTo(p.x, p.y));
-
-    g.closePath();
-    g.fillPath();
-
-    // Chrome face of the curved deflector
-    g.lineStyle(4, 0x888ea0);
-    g.beginPath();
-    curvePoints.forEach((p, index) => {
-      if (index === 0) g.moveTo(p.x, p.y);
-      else g.lineTo(p.x, p.y);
-    });
-    g.strokePath();
-
-    // Physics for curved deflector using small rectangles (segments) to ensure perfect alignment
-    for (let i = 0; i < curvePoints.length - 1; i++) {
-      const p1 = curvePoints[i];
-      const p2 = curvePoints[i + 1];
-      if (!p1 || !p2) continue;
-
-      const cx = (p1.x + p2.x) / 2;
-      const cy = (p1.y + p2.y) / 2;
-      const angle = Phaser.Math.Angle.Between(p1.x, p1.y, p2.x, p2.y);
-      const length = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
-
-      this.matter.add.rectangle(cx, cy, length, 4, {
-        isStatic: true,
-        angle: angle,
-        restitution: 0.2,
-      });
-
-      // Smooth out the joints with tiny circles so the ball never snags on a corner
-      this.matter.add.circle(p1.x, p1.y, 2, {
-        isStatic: true,
-        restitution: 0.2,
-      });
-    }
-    const lastP = curvePoints[curvePoints.length - 1];
-    if (lastP) {
-      this.matter.add.circle(lastP.x, lastP.y, 2, { isStatic: true, restitution: 0.2 });
-    }
-
-    // Also add the vertical right wall part of the deflector (down to 260)
-    // The right rail goes from 154 -> 734. The curve ends at 470, 260.
-    // The ball needs to smoothly hit the curve from the right wall.
-
-    // (Removed old thin 10px ceiling wall since the new 50px thick one is declared above)
 
     // Astronaut Mascot in Art Zone
     this._astronautBaseX = 210;
@@ -304,6 +230,75 @@ export class GameScene extends Phaser.Scene {
         restitution: 0.35,
         friction: 0.005,
       });
+    }
+  }
+
+  protected addShooterLaneTop(g: Phaser.GameObjects.Graphics): void {
+    const laneGuideY = FEEL.laneGuideTopY;
+    const laneGuideHeight = 734 - laneGuideY;
+    const track = FEEL.topTrack;
+
+    this.add.rectangle(LANE_GUIDE_X, laneGuideY, 4, laneGuideHeight, 0x888ea0).setOrigin(0);
+    this.matter.add.rectangle(
+      LANE_GUIDE_X + 2,
+      laneGuideY + laneGuideHeight / 2,
+      4,
+      laneGuideHeight,
+      { isStatic: true }
+    );
+    this.matter.add.circle(LANE_GUIDE_X + 2, laneGuideY, 2, { isStatic: true, restitution: 0.4 });
+
+    this.addLaneWallBumpers(laneGuideY);
+
+    g.fillStyle(0x1a1e2a);
+    g.beginPath();
+    g.moveTo(track.innerX, track.topY);
+    g.lineTo(track.outerX, track.topY);
+    g.lineTo(track.outerX, track.bottomY);
+
+    const curve = new Phaser.Curves.QuadraticBezier(
+      new Phaser.Math.Vector2(track.outerX, track.bottomY),
+      new Phaser.Math.Vector2(track.outerX - 10, track.controlY),
+      new Phaser.Math.Vector2(track.innerX, track.topY)
+    );
+    const curvePoints = curve.getPoints(16);
+    curvePoints.forEach((p) => g.lineTo(p.x, p.y));
+
+    g.closePath();
+    g.fillPath();
+
+    g.lineStyle(4, 0x888ea0);
+    g.beginPath();
+    curvePoints.forEach((p, index) => {
+      if (index === 0) g.moveTo(p.x, p.y);
+      else g.lineTo(p.x, p.y);
+    });
+    g.strokePath();
+
+    for (let i = 0; i < curvePoints.length - 1; i++) {
+      const p1 = curvePoints[i];
+      const p2 = curvePoints[i + 1];
+      if (!p1 || !p2) continue;
+
+      const cx = (p1.x + p2.x) / 2;
+      const cy = (p1.y + p2.y) / 2;
+      const angle = Phaser.Math.Angle.Between(p1.x, p1.y, p2.x, p2.y);
+      const length = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+
+      this.matter.add.rectangle(cx, cy, length, 4, {
+        isStatic: true,
+        angle: angle,
+        restitution: 0.2,
+      });
+
+      this.matter.add.circle(p1.x, p1.y, 2, {
+        isStatic: true,
+        restitution: 0.2,
+      });
+    }
+    const lastP = curvePoints[curvePoints.length - 1];
+    if (lastP) {
+      this.matter.add.circle(lastP.x, lastP.y, 2, { isStatic: true, restitution: 0.2 });
     }
   }
 

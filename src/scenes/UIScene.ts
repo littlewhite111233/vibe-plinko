@@ -32,7 +32,7 @@ export class UIScene extends Phaser.Scene {
   private _scoreText!: Phaser.GameObjects.Text;
   private _multiplierLEDs: Phaser.GameObjects.Image[] = [];
   private _statusText!: Phaser.GameObjects.Text;
-  private _chargeBarFill!: Phaser.GameObjects.Rectangle;
+  private _plungerSpringGfx!: Phaser.GameObjects.Graphics;
   private _potentialWinText!: Phaser.GameObjects.Text;
 
   // Lever elements
@@ -40,6 +40,7 @@ export class UIScene extends Phaser.Scene {
   private _leverHighlight!: Phaser.GameObjects.Arc;
   private _leverBaseY: number = 754; // BOTTOM_Y + 20
   private _leverMaxPull: number = 70;
+  private _springBottomY: number = 816; // BOTTOM_Y + 82
 
   private _roundData: RoundResultData | undefined;
   private _gameOverContainer?: Phaser.GameObjects.Container;
@@ -139,16 +140,42 @@ export class UIScene extends Phaser.Scene {
       this._leverHandle.y = newY;
       this._leverHighlight.y = newY;
 
-      this._chargeBarFill.scaleY = ratio;
+      this.drawPlungerSpring(ratio);
       this.emitToGameScene('spring_charge', ratio);
       if (ratio >= 0.98) {
         this.setStatusText('MAX!', '#ff2200');
-        this._chargeBarFill.fillColor = 0xff2200;
       } else {
         this.setStatusText('CHARGING...', '#ffb300');
-        this._chargeBarFill.fillColor = 0xffb300;
       }
     }
+  }
+
+  private drawPlungerSpring(ratio: number): void {
+    const springX = 458;
+    const plungerY = this._leverBaseY + ratio * this._leverMaxPull;
+    const springTop = plungerY + 13;
+    const springBottom = this._springBottomY;
+    const springHeight = Math.max(6, springBottom - springTop);
+    const segments = 7;
+    const springWidth = 10;
+    const lineColor = ratio >= 0.98 ? 0xff2200 : ratio > 0.45 ? 0xffb300 : 0x888ea0;
+
+    this._plungerSpringGfx.clear();
+    this._plungerSpringGfx.lineStyle(2, lineColor);
+    this._plungerSpringGfx.beginPath();
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const y = springTop + springHeight * t;
+      const x = springX + (i % 2 === 0 ? -springWidth / 2 : springWidth / 2);
+      if (i === 0) this._plungerSpringGfx.moveTo(x, y);
+      else this._plungerSpringGfx.lineTo(x, y);
+    }
+    this._plungerSpringGfx.strokePath();
+
+    this._plungerSpringGfx.fillStyle(0x3a3f50);
+    this._plungerSpringGfx.fillRect(springX - 8, springTop - 3, 16, 4);
+    this._plungerSpringGfx.fillStyle(lineColor);
+    this._plungerSpringGfx.fillRect(springX - 9, springBottom, 18, 5);
   }
 
   private createTopPanel() {
@@ -206,9 +233,12 @@ export class UIScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    // Energy strip sits right of the 10X LED (360); must not share x=300 with the 8X tier LED
     this._energyLeds = [];
+    const energyStartX = 378;
+    const energySpacing = 10;
     for (let i = 0; i < ENERGY_MAX; i++) {
-      const led = this.add.image(300 + i * 16, 132, 'led_unlit');
+      const led = this.add.image(energyStartX + i * energySpacing, 132, 'led_unlit');
       this._energyLeds.push(led);
     }
 
@@ -264,25 +294,17 @@ export class UIScene extends Phaser.Scene {
     this.updateBetChipState();
 
 
-    // Charge bar (hidden initially)
-    this.add.rectangle(416, BOTTOM_Y + 56, 10, 96, 0x050b14).setOrigin(0.5);
-    this._chargeBarFill = this.add
-      .rectangle(416, BOTTOM_Y + 104, 10, 96, 0xffb300)
-      .setOrigin(0.5, 1);
-    this._chargeBarFill.scaleY = 0;
-
-    // Lever slot background
+    // Plunger assembly (spring compresses as handle is pulled)
     this.add.rectangle(458, BOTTOM_Y + 56, 12, 96, 0x050b14).setOrigin(0.5);
-    // Lever shaft
-    this.add.rectangle(458, BOTTOM_Y + 46, 4, 76, 0x888ea0).setOrigin(0.5);
-    // Lever handle (resting at top of slot)
-    this._leverHandle = this.add.circle(458, BOTTOM_Y + 16, 14, 0x3a3f50); // main handle
-    this._leverHighlight = this.add.circle(458, BOTTOM_Y + 16, 6, 0x4a5060); // handle highlight
+    this._plungerSpringGfx = this.add.graphics();
+    this.drawPlungerSpring(0);
+    this._leverHandle = this.add.circle(458, BOTTOM_Y + 16, 14, 0x3a3f50);
+    this._leverHighlight = this.add.circle(458, BOTTOM_Y + 16, 6, 0x4a5060);
 
     this._leverBaseY = BOTTOM_Y + 16;
     this._leverMaxPull = 70;
+    this._springBottomY = BOTTOM_Y + 82;
 
-    // Interactive hit zone for the lever
     const leverHitZone = this.add
       .zone(458, BOTTOM_Y + 56, 50, 120)
       .setInteractive({ cursor: 'pointer' });
@@ -472,7 +494,7 @@ export class UIScene extends Phaser.Scene {
       this._state = 'charging';
       this._chargeStartTime = this.time.now;
       this.setStatusText('CHARGING...', '#ffb300');
-      this._chargeBarFill.fillColor = 0xffb300;
+      this.drawPlungerSpring(0);
       this.updateBetChipState();
       this.refreshToolbarState();
     }
@@ -493,7 +515,7 @@ export class UIScene extends Phaser.Scene {
 
       const power = chargePullRatio(this.time.now - this._chargeStartTime);
 
-      this._chargeBarFill.scaleY = 0;
+      this.drawPlungerSpring(0);
       this.emitToGameScene('spring_charge', 0);
       this._leverHandle.y = this._leverBaseY;
       this._leverHighlight.y = this._leverBaseY;
@@ -639,7 +661,7 @@ export class UIScene extends Phaser.Scene {
       this._potentialWinText.setColor('#b0b8c8');
     }
 
-    this._chargeBarFill.scaleY = 0;
+    this.drawPlungerSpring(0);
     this._leverHandle.y = this._leverBaseY;
     this._leverHighlight.y = this._leverBaseY;
 
