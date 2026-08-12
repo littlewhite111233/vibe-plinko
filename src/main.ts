@@ -7,7 +7,18 @@ import { MoonScene } from './scenes/MoonScene';
 const debugParams = new URLSearchParams(window.location.search);
 const isDebug = debugParams.get('debug') === '1';
 
-const setViewportHeight = () => {
+const dismissBootStatus = (): void => {
+  document.getElementById('boot-status')?.remove();
+};
+
+const showBootError = (message: string): void => {
+  const el = document.getElementById('boot-status');
+  if (!el) return;
+  el.textContent = message;
+  el.className = 'error';
+};
+
+const setViewportHeight = (): void => {
   const vh = window.innerHeight * 0.01;
   document.documentElement.style.setProperty('--vh', `${vh}px`);
 };
@@ -40,4 +51,14 @@ const config: Phaser.Types.Core.GameConfig = {
   roundPixels: true,
 };
 
-export default new Phaser.Game(config);
+let game: Phaser.Game;
+try {
+  game = new Phaser.Game(config);
+  game.events.once(Phaser.Core.Events.READY, dismissBootStatus);
+} catch (error) {
+  const message = error instanceof Error ? error.message : 'Failed to start game';
+  showBootError(`Start failed: ${message}`);
+  throw error;
+}
+
+export default game;

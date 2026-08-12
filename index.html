@@ -7,10 +7,14 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
     <title>SuperBall</title>
-    <!-- Load standard pixel font -->
+    <!-- Non-blocking font load (avoid hang when Google Fonts is slow/unreachable) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
     <style>
       :root {
@@ -40,14 +44,50 @@
       }
       /* Hide the original font rendering so it loads before canvas uses it */
       #font-loader {
-        font-family: 'Press Start 2P';
+        font-family: 'Press Start 2P', monospace;
         color: transparent;
         position: absolute;
         top: -9999px;
       }
+      #boot-status {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+        background: #1a1e2a;
+        color: #ffb300;
+        font-family: monospace;
+        font-size: 14px;
+        text-align: center;
+        padding: 24px;
+        z-index: 9999;
+      }
+      #boot-status.error {
+        color: #ff4466;
+      }
     </style>
+    <script>
+      window.__superballBootError = function (message) {
+        var el = document.getElementById('boot-status');
+        if (!el) return;
+        el.textContent = message;
+        el.className = 'error';
+      };
+      window.addEventListener('error', function (event) {
+        window.__superballBootError('Load failed: ' + (event.message || 'unknown error'));
+      });
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event.reason;
+        var message = reason && reason.message ? reason.message : String(reason);
+        window.__superballBootError('Load failed: ' + message);
+      });
+    </script>
   </head>
   <body>
+    <div id="boot-status">Loading SuperBall...</div>
     <div id="font-loader">.</div>
     <div id="game-container"></div>
     <script type="module" src="/src/main.ts"></script>
