@@ -18,17 +18,36 @@ export const FEEL = {
     friction: 0.015,
   },
   launch: {
-    minVy: -22,
-    maxVy: -40,
-    minVx: -2.5,
-    maxVx: -6.5,
+    maxVy: -44,
+    maxVx: -7.2,
+    /** Below this pull ratio the plunger does not release the ball. */
+    minPull: 0.08,
+  },
+  /** Plunger-style charge: linear 0→full→0 loop while held. */
+  charge: {
+    halfCycleMs: 1200,
   },
   maxSpeed: 48,
-  stuckAfterMs: 900,
+  stuckAfterMs: 500,
+  stuckMoveEpsilon: 2.5,
   pegFieldTop: 317,
   pegFieldBottom: 648,
   tunnelY: 648,
+  /** Shooter-lane divider — pegs must leave this much air for the ball. */
+  laneGuideX: 436,
+  laneWallClearance: 22,
 } as const;
+
+export const LANE_GUIDE_X = FEEL.laneGuideX;
+
+/** Keep pegs out of the peg/lane crevice where the ball wedges. */
+export function pegClearsLaneWall(
+  px: number,
+  pegRadius: number,
+  clearance: number = FEEL.laneWallClearance
+): boolean {
+  return px + pegRadius + FEEL.ball.circleRadius + clearance < LANE_GUIDE_X;
+}
 
 export function curveLaunchPower(raw: number): number {
   const t = Math.min(1, Math.max(0, raw));
@@ -36,11 +55,28 @@ export function curveLaunchPower(raw: number): number {
   return t * t * (3 - 2 * t);
 }
 
-export function computeLaunchVelocity(power: number): { vx: number; vy: number } {
-  const t = curveLaunchPower(power);
+/** Triangle wave 0→1→0 for looping plunger pull (elapsed ms since hold began). */
+export function chargePullRatio(
+  elapsedMs: number,
+  halfCycleMs: number = FEEL.charge.halfCycleMs
+): number {
+  const period = halfCycleMs * 2;
+  const mod = ((elapsedMs % period) + period) % period;
+  const phase = mod / halfCycleMs;
+  if (phase <= 1) return phase;
+  return 2 - phase;
+}
+
+export function computeLaunchVelocity(
+  power: number
+): { vx: number; vy: number } | null {
+  const t = Math.min(1, Math.max(0, power));
+  if (t < FEEL.launch.minPull) return null;
+  // Quadratic-ish: tap stays weak, mid/full a bit punchier.
+  const e = Math.pow(t, 1.75);
   return {
-    vx: FEEL.launch.minVx + (FEEL.launch.maxVx - FEEL.launch.minVx) * t,
-    vy: FEEL.launch.minVy + (FEEL.launch.maxVy - FEEL.launch.minVy) * t,
+    vx: FEEL.launch.maxVx * e,
+    vy: FEEL.launch.maxVy * e,
   };
 }
 

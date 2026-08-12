@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { computeLaunchVelocity, curveLaunchPower } from './FeelConfig';
+import {
+  chargePullRatio,
+  computeLaunchVelocity,
+  curveLaunchPower,
+  FEEL,
+  pegClearsLaneWall,
+} from './FeelConfig';
 
 describe('curveLaunchPower', () => {
   it('smoothsteps 0→1 with softer low end', () => {
@@ -10,12 +16,35 @@ describe('curveLaunchPower', () => {
   });
 });
 
+describe('chargePullRatio', () => {
+  it('ramps linearly 0→1→0 over one full cycle', () => {
+    const half = FEEL.charge.halfCycleMs;
+    expect(chargePullRatio(0)).toBe(0);
+    expect(chargePullRatio(half / 2)).toBeCloseTo(0.5);
+    expect(chargePullRatio(half)).toBeCloseTo(1);
+    expect(chargePullRatio(half * 1.5)).toBeCloseTo(0.5);
+    expect(chargePullRatio(half * 2)).toBeCloseTo(0);
+  });
+});
+
 describe('computeLaunchVelocity', () => {
-  it('adds leftward vx and upward vy that scale with power', () => {
-    const low = computeLaunchVelocity(0.1);
-    const high = computeLaunchVelocity(1);
-    expect(low.vx).toBeGreaterThan(high.vx);
-    expect(low.vy).toBeGreaterThan(high.vy);
-    expect(high.vx).toBeLessThan(0);
+  it('returns null for tap pulls and scales quadratically to max', () => {
+    expect(computeLaunchVelocity(0)).toBeNull();
+    expect(computeLaunchVelocity(0.04)).toBeNull();
+    const mid = computeLaunchVelocity(0.5);
+    const full = computeLaunchVelocity(1);
+    expect(mid).not.toBeNull();
+    expect(full).not.toBeNull();
+    expect(Math.abs(mid!.vx)).toBeLessThan(Math.abs(full!.vx));
+    expect(Math.abs(mid!.vy)).toBeLessThan(Math.abs(full!.vy));
+    expect(full!.vx).toBeCloseTo(FEEL.launch.maxVx);
+    expect(full!.vy).toBeCloseTo(FEEL.launch.maxVy);
+  });
+});
+
+describe('pegClearsLaneWall', () => {
+  it('rejects right-column pegs that wedge against the lane divider', () => {
+    expect(pegClearsLaneWall(412, FEEL.washer.circleRadius)).toBe(false);
+    expect(pegClearsLaneWall(388, FEEL.peg.circleRadius)).toBe(true);
   });
 });

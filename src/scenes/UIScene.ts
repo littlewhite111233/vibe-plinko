@@ -12,7 +12,7 @@ import {
   updateInventory,
 } from '../meta/ProgressionStore';
 import { applyInventoryModifiers, consumeInventory } from '../meta/RoundModifiers';
-import { curveLaunchPower } from '../physics/FeelConfig';
+import { chargePullRatio, FEEL } from '../physics/FeelConfig';
 import { MiniGameOverlay } from '../ui/MiniGameOverlay';
 import { ShopPanel } from '../ui/ShopPanel';
 
@@ -110,21 +110,23 @@ export class UIScene extends Phaser.Scene {
     this.refreshMetaHud();
   }
 
-  override update(time: number, _delta: number): void {
+  override update(_time: number, _delta: number): void {
     // Handle lever charge animation if active
     if (this._state === 'charging') {
-      const chargeDuration = time - this._chargeStartTime;
-      const ratio = Phaser.Math.Clamp(chargeDuration / 1500, 0, 1);
+      const ratio = chargePullRatio(this.time.now - this._chargeStartTime);
       const newY = this._leverBaseY + ratio * this._leverMaxPull;
 
       this._leverHandle.y = newY;
       this._leverHighlight.y = newY;
 
-      this._chargeBarFill.scaleY = curveLaunchPower(ratio);
+      this._chargeBarFill.scaleY = ratio;
       this.emitToGameScene('spring_charge', ratio);
-      if (ratio === 1) {
-        this.setStatusText('MAX POWER!', '#ff2200');
+      if (ratio >= 0.98) {
+        this.setStatusText('MAX!', '#ff2200');
         this._chargeBarFill.fillColor = 0xff2200;
+      } else {
+        this.setStatusText('CHARGING...', '#ffb300');
+        this._chargeBarFill.fillColor = 0xffb300;
       }
     }
   }
@@ -213,11 +215,11 @@ export class UIScene extends Phaser.Scene {
     this.add.rectangle(0, BOTTOM_Y, 480, 3, 0xffb300).setOrigin(0);
 
     // Preset bet chips (single row)
-    const chipValues = [5, 10, 50, 100];
-    const chipStartX = 70;
+    const chipValues = [1, 5, 10, 50, 100];
+    const chipStartX = 52;
     const chipY = BOTTOM_Y + 50;
-    const chipSpacing = 80;
-    const chipWidth = 70;
+    const chipSpacing = 68;
+    const chipWidth = 64;
     const chipHeight = 56;
 
     this._betChips = [];
@@ -467,21 +469,22 @@ export class UIScene extends Phaser.Scene {
         this.updateCredits(this._credits - stake);
       }
 
-      this._state = 'in_flight';
-      this.setStatusText('IN FLIGHT...', '#b0b8c8');
+      const power = chargePullRatio(this.time.now - this._chargeStartTime);
+
       this._chargeBarFill.scaleY = 0;
       this.emitToGameScene('spring_charge', 0);
-      this.updateBetChipState();
-
-      const chargeDuration = this.time.now - this._chargeStartTime;
-      const rawPower = Phaser.Math.Clamp(chargeDuration / 1500, 0.08, 1.0);
-      const power = curveLaunchPower(rawPower);
-
-      // Snap lever back
       this._leverHandle.y = this._leverBaseY;
       this._leverHighlight.y = this._leverBaseY;
 
-      // Tell game scene to launch
+      if (power < FEEL.launch.minPull) {
+        this.setStatusText('PULL / RELEASE TIMING', '#ffb300');
+        return;
+      }
+
+      this._state = 'in_flight';
+      this.setStatusText('IN FLIGHT...', '#b0b8c8');
+      this.updateBetChipState();
+
       const ballCount = this._debugMultiBall ? 10 : 1;
       this.emitToGameScene('launchBall', power, this._roundData, ballCount);
     }

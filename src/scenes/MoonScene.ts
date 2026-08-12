@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { FEEL, LANE_GUIDE_X, pegClearsLaneWall } from '../physics/FeelConfig';
 import { GameScene } from './GameScene';
 
 export class MoonScene extends GameScene {
@@ -51,7 +52,6 @@ export class MoonScene extends GameScene {
     this.matter.add.rectangle(240, 154 - 25, 480, 50, { isStatic: true });
 
     // Lane Guide (right side)
-    const LANE_GUIDE_X = 436;
     const LANE_GUIDE_Y = 350;
     const LANE_GUIDE_HEIGHT = 734 - LANE_GUIDE_Y;
     this.add.rectangle(LANE_GUIDE_X, LANE_GUIDE_Y, 4, LANE_GUIDE_HEIGHT, 0x888ea0).setOrigin(0);
@@ -63,6 +63,8 @@ export class MoonScene extends GameScene {
       { isStatic: true }
     );
     this.matter.add.circle(LANE_GUIDE_X + 2, LANE_GUIDE_Y, 2, { isStatic: true, restitution: 0.4 });
+
+    this.addLaneWallBumpers(LANE_GUIDE_Y);
 
     // Shooter Lane Spring
     this._springGraphics = this.add.graphics();
@@ -153,27 +155,29 @@ export class MoonScene extends GameScene {
         const px = PLAYFIELD_X1 + xOffset + c * COL_SPACING;
         const py = PEG_FIELD_Y + 20 + r * ROW_SPACING;
 
-        if (px < 420) {
-          if (r === 0) {
+        if (r === 0) {
+          if (pegClearsLaneWall(px, FEEL.washer.circleRadius)) {
             this.addPegAt(px, py, true);
-            continue;
           }
-
-          const isBigRock = rng.frac() < 0.2;
-          const isRock = !isBigRock && rng.frac() < 0.3;
-          const textureKey = isBigRock ? 'moon_rock_big' : isRock ? 'moon_rock' : 'peg';
-          const label = isBigRock ? 'moon_rock_big' : isRock ? 'moon_rock' : 'peg';
-          const circleRadius = isBigRock ? 7 : 5;
-          const peg = this.matter.add.image(px, py, textureKey, undefined, {
-            isStatic: true,
-            circleRadius: circleRadius,
-            restitution: 0.05,
-            friction: 0.05,
-            label,
-          });
-
-          if (isRock || isBigRock) this._moonRocks.add(peg);
+          continue;
         }
+
+        const isBigRock = rng.frac() < 0.2;
+        const isRock = !isBigRock && rng.frac() < 0.3;
+        const circleRadius = isBigRock ? 7 : 5;
+        if (!pegClearsLaneWall(px, circleRadius)) continue;
+
+        const textureKey = isBigRock ? 'moon_rock_big' : isRock ? 'moon_rock' : 'peg';
+        const label = isBigRock ? 'moon_rock_big' : isRock ? 'moon_rock' : 'peg';
+        const peg = this.matter.add.image(px, py, textureKey, undefined, {
+          isStatic: true,
+          circleRadius: circleRadius,
+          restitution: 0.05,
+          friction: 0.05,
+          label,
+        });
+
+        if (isRock || isBigRock) this._moonRocks.add(peg);
       }
     }
   }

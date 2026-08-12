@@ -4,6 +4,8 @@ import {
   ballBodyOptions,
   computeLaunchVelocity,
   FEEL,
+  LANE_GUIDE_X,
+  pegClearsLaneWall,
 } from '../physics/FeelConfig';
 
 export class GameScene extends Phaser.Scene {
@@ -16,6 +18,8 @@ export class GameScene extends Phaser.Scene {
   private _lastStopLogTime: number = 0;
   private _lastStuckShakeTime: number = 0;
   private _ballLastMotion: Map<Phaser.Physics.Matter.Sprite, number> = new Map();
+  private _ballLastSample: Map<Phaser.Physics.Matter.Sprite, { x: number; y: number }> =
+    new Map();
   private _settlingBalls: Set<Phaser.Physics.Matter.Sprite> = new Set();
   private _roundActive: boolean = false;
   private _roundData: RoundResultData | undefined;
@@ -123,7 +127,6 @@ export class GameScene extends Phaser.Scene {
     this.matter.add.rectangle(240, 154 - 25, 480, 50, { isStatic: true });
 
     // Lane Guide (right side) - start lower at 350 so ball can escape
-    const LANE_GUIDE_X = 436;
     const LANE_GUIDE_Y = 350;
     const LANE_GUIDE_HEIGHT = 734 - LANE_GUIDE_Y; // 384
     this.add.rectangle(LANE_GUIDE_X, LANE_GUIDE_Y, 4, LANE_GUIDE_HEIGHT, 0x888ea0).setOrigin(0); // chrome guide wall
@@ -135,6 +138,8 @@ export class GameScene extends Phaser.Scene {
       { isStatic: true }
     );
     this.matter.add.circle(LANE_GUIDE_X + 2, LANE_GUIDE_Y, 2, { isStatic: true, restitution: 0.4 });
+
+    this.addLaneWallBumpers(LANE_GUIDE_Y);
 
     // Shooter Lane Spring
     this._springGraphics = this.add.graphics();
@@ -290,6 +295,16 @@ export class GameScene extends Phaser.Scene {
     this._astronaut.x = this._astronautBaseX;
   }
 
+  protected addLaneWallBumpers(laneGuideY: number): void {
+    for (let y = laneGuideY + 30; y <= FEEL.tunnelY - 20; y += 65) {
+      this.matter.add.circle(LANE_GUIDE_X - 5, y, 4, {
+        isStatic: true,
+        restitution: 0.35,
+        friction: 0.005,
+      });
+    }
+  }
+
   protected applyViewport(): void {
     const { width, height } = this.scale;
     const zoom = Math.min(width / GameScene.BASE_WIDTH, height / GameScene.BASE_HEIGHT);
@@ -318,8 +333,8 @@ export class GameScene extends Phaser.Scene {
         const px = PLAYFIELD_X1 + xOffset + c * COL_SPACING;
         const py = PEG_FIELD_Y + 20 + r * ROW_SPACING;
 
-        // Skip rightmost pegs if they cross into shooter lane (436)
-        if (px < 420) {
+        const pegRadius = r === 0 ? FEEL.washer.circleRadius : FEEL.peg.circleRadius;
+        if (pegClearsLaneWall(px, pegRadius)) {
           this.addPegAt(px, py, r === 0);
         }
       }
@@ -439,6 +454,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   public launchBall(power: number, roundData: RoundResultData, count: number = 1): void {
+    const velocity = computeLaunchVelocity(power);
+    if (!velocity) {
+      this.events.emit('failed_launch');
+      return;
+    }
+
     this.sound.play('sfx_launch');
 
     this._roundActive = true;
@@ -477,7 +498,7 @@ export class GameScene extends Phaser.Scene {
     this.applyBallCollisionGroup(this._ball, noBallCollision);
     this._activeBalls.add(this._ball);
 
-    const { vx, vy } = computeLaunchVelocity(power);
+    const { vx, vy } = velocity;
     this._ball.setVelocity(vx, vy);
 
     const extraCount = Math.max(0, Math.floor(count) - 1);
@@ -659,6 +680,7 @@ export class GameScene extends Phaser.Scene {
     if (this._extraBalls.length === 0) return;
     for (const ball of this._extraBalls) {
       this._ballLastMotion.delete(ball);
+      this._ballLastSample.delete(ball);
       this._settlingBalls.delete(ball);
       ball.destroy();
     }
@@ -668,6 +690,7 @@ export class GameScene extends Phaser.Scene {
   private clearAllBalls(): void {
     if (this._ball) {
       this._ballLastMotion.delete(this._ball);
+      this._ballLastSample.delete(this._ball);
       this._settlingBalls.delete(this._ball);
       this._ball.destroy();
       this._ball = undefined;
@@ -685,9 +708,14 @@ export class GameScene extends Phaser.Scene {
       ball.setVelocity(body.velocity.x * scale, body.velocity.y * scale);
     }
 
-    if (currentSpeed > 0.15) {
-      this._ballLastMotion.set(ball, this.time.now);
+    const sample = this._ballLastSample.get(ball);
+    if (sample) {
+      const moved = Phaser.Math.Distance.Between(ball.x, ball.y, sample.x, sample.y);
+      if (moved > FEEL.stuckMoveEpsilon) {
+        this._ballLastMotion.set(ball, this.time.now);
+      }
     }
+    this._ballLastSample.set(ball, { x: ball.x, y: ball.y });
 
     if (!this._roundActive) return;
 
@@ -696,11 +724,19 @@ export class GameScene extends Phaser.Scene {
     const lastMotion = this._ballLastMotion.get(ball) ?? this.time.now;
     const stuckTime = this.time.now - lastMotion;
 
-    if (inPegField && stuckTime > FEEL.stuckAfterMs && this.time.now - this._lastStuckShakeTime > 1200) {
+    if (inPegField && stuckTime > FEEL.stuckAfterMs && this.time.now - this._lastStuckShakeTime > 800) {
       this.cameras.main.shake(120, 0.003);
-      const nudgeVx = (Math.random() - 0.5) * 1.4;
-      const nudgeVy = 0.6 + Math.random() * 0.8;
-      ball.setVelocity(body.velocity.x * 0.15 + nudgeVx, nudgeVy);
+      const nearLaneWall = ball.x > LANE_GUIDE_X - 60;
+      const nudgeVx = nearLaneWall
+        ? -2.8 - Math.random() * 1.2
+        : (Math.random() - 0.5) * 2.0;
+      const nudgeVy = 1.0 + Math.random() * 1.2;
+      if (nearLaneWall) {
+        ball.setPosition(LANE_GUIDE_X - FEEL.ball.circleRadius - 10, ball.y);
+      }
+      ball.setVelocity(nudgeVx, nudgeVy);
+      this._ballLastMotion.set(ball, this.time.now);
+      this._ballLastSample.set(ball, { x: ball.x, y: ball.y });
       this._lastStuckShakeTime = this.time.now;
       return;
     }
