@@ -52,7 +52,7 @@ export class UIScene extends Phaser.Scene {
   private _miniGameOverlay?: MiniGameOverlay;
   private _hudToolbar?: HudToolbar;
   private _pointsText!: Phaser.GameObjects.Text;
-  private _energyLeds: Phaser.GameObjects.Image[] = [];
+  private _energyText!: Phaser.GameObjects.Text;
   private _isMiniGameRound = false;
   private _pendingMiniGame = false;
   private _betChips: Array<{
@@ -233,14 +233,13 @@ export class UIScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Energy strip sits right of the 10X LED (360); must not share x=300 with the 8X tier LED
-    this._energyLeds = [];
-    const energyStartX = 378;
-    const energySpacing = 10;
-    for (let i = 0; i < ENERGY_MAX; i++) {
-      const led = this.add.image(energyStartX + i * energySpacing, 132, 'led_unlit');
-      this._energyLeds.push(led);
-    }
+    this._energyText = this.add
+      .text(400, 130, `NRG 0/${ENERGY_MAX}`, {
+        fontFamily: '"Press Start 2P"',
+        fontSize: '10px',
+        color: '#00d9ff',
+      })
+      .setOrigin(0.5);
 
     // Multiplier LEDs (placeholder unlit)
     const mults = [2, 4, 6, 8, 10];
@@ -342,9 +341,9 @@ export class UIScene extends Phaser.Scene {
   private refreshMetaHud(): void {
     const state = getProgressionState();
     this._pointsText?.setText(`PT ${state.points.toString().padStart(3, '0')}`);
-    this._energyLeds.forEach((led, i) => {
-      led.setTexture(i < state.energy ? 'led_lit' : 'led_unlit');
-    });
+    this._energyText?.setText(
+      `NRG ${state.energy.toString().padStart(2, '0')}/${ENERGY_MAX}`
+    );
     this._shopPanel?.refresh();
     this.refreshToolbarState();
   }
