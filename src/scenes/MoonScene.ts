@@ -154,6 +154,11 @@ export class MoonScene extends GameScene {
         const py = PEG_FIELD_Y + 20 + r * ROW_SPACING;
 
         if (px < 420) {
+          if (r === 0) {
+            this.addPegAt(px, py, true);
+            continue;
+          }
+
           const isBigRock = rng.frac() < 0.2;
           const isRock = !isBigRock && rng.frac() < 0.3;
           const textureKey = isBigRock ? 'moon_rock_big' : isRock ? 'moon_rock' : 'peg';
@@ -184,14 +189,25 @@ export class MoonScene extends GameScene {
     const pegBody = isBallA ? bodyB : bodyA;
 
     if (
-      (pegBody.label === 'peg' || pegBody.label === 'moon_rock' || pegBody.label === 'moon_rock_big') &&
+      (pegBody.label === 'peg' ||
+        pegBody.label === 'peg_washer' ||
+        pegBody.label === 'moon_rock' ||
+        pegBody.label === 'moon_rock_big') &&
       pegBody.gameObject
     ) {
-      this.triggerPegBloom(pegBody.gameObject as Phaser.Physics.Matter.Image);
+      this.triggerPegBloom(
+        pegBody.gameObject as Phaser.Physics.Matter.Image,
+        pegBody.label === 'peg_washer'
+      );
     }
   }
 
-  protected override triggerPegBloom(pegImage: Phaser.Physics.Matter.Image): void {
+  protected override triggerPegBloom(pegImage: Phaser.Physics.Matter.Image, isWasher = false): void {
+    if (isWasher) {
+      super.triggerPegBloom(pegImage, true);
+      return;
+    }
+
     this.sound.play('sfx_peg', { volume: 0.5 });
 
     const bloomKey = this._moonRocks.has(pegImage) ? 'moon_bloom' : 'peg_bloom';

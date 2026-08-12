@@ -1,5 +1,20 @@
 import Phaser from 'phaser';
-import { rollRound, RoundResultData } from '../rng/RoundResult';
+import { CheatPanel } from '../cheat/CheatPanel';
+import { resolveRound, RoundResultData } from '../cheat/CheatSettings';
+import { calcPointsFromPayout } from '../meta/PointsEconomy';
+import {
+  addPoints,
+  consumeEnergyForMiniGame,
+  ENERGY_MAX,
+  getProgressionState,
+  loadProgression,
+  recordBeadLoss,
+  updateInventory,
+} from '../meta/ProgressionStore';
+import { applyInventoryModifiers, consumeInventory } from '../meta/RoundModifiers';
+import { curveLaunchPower } from '../physics/FeelConfig';
+import { MiniGameOverlay } from '../ui/MiniGameOverlay';
+import { ShopPanel } from '../ui/ShopPanel';
 
 type GameState = 'idle' | 'betting' | 'charging' | 'in_flight';
 
@@ -30,6 +45,13 @@ export class UIScene extends Phaser.Scene {
   private _activeGameSceneKey: 'GameScene' | 'MoonScene' = 'GameScene';
   private _travelLocked: boolean = false;
   private _mapSelectContainer?: Phaser.GameObjects.Container;
+  private _cheatPanel?: CheatPanel;
+  private _shopPanel?: ShopPanel;
+  private _miniGameOverlay?: MiniGameOverlay;
+  private _pointsText!: Phaser.GameObjects.Text;
+  private _energyLeds: Phaser.GameObjects.Image[] = [];
+  private _isMiniGameRound = false;
+  private _pendingMiniGame = false;
   private _betChips: Array<{
     amount: number;
     button: Phaser.GameObjects.Rectangle;
@@ -50,8 +72,28 @@ export class UIScene extends Phaser.Scene {
     this.createOverlay();
     this.createMapSelect();
 
-    // Example: Bind insert beads button
-    // The GameScene handles logic, UIScene just reads/sends events
+    loadProgression();
+
+    this._shopPanel = new ShopPanel(this, {
+      onBeadsPurchased: (amount) => {
+        this.updateCredits(this._credits + amount);
+      },
+      onRefresh: () => this.refreshMetaHud(),
+    });
+    this._shopPanel.create();
+
+    this._miniGameOverlay = new MiniGameOverlay(this, {
+      onMashDone: (invest) => this.beginMiniGameBetting(invest),
+      onSpacePress: () => this.refreshMetaHud(),
+    });
+    this._miniGameOverlay.create();
+    this._miniGameOverlay.bindKeyboard();
+
+    this._cheatPanel = new CheatPanel(this, {
+      onApplyRound: () => this.applyCheatRound(),
+      onClose: () => this.ensureUiOnTop(),
+    });
+    this._cheatPanel.create();
 
     this.onInsertBeads();
 
@@ -62,6 +104,10 @@ export class UIScene extends Phaser.Scene {
 
     this.input.keyboard?.on('keydown-F', this.onCheatCredits, this);
     this.input.keyboard?.on('keydown-M', this.onToggleMap, this);
+    this.input.keyboard?.on('keydown-C', this.onToggleCheatPanel, this);
+    this.input.keyboard?.on('keydown-S', this.onToggleShop, this);
+
+    this.refreshMetaHud();
   }
 
   override update(time: number, _delta: number): void {
@@ -74,7 +120,7 @@ export class UIScene extends Phaser.Scene {
       this._leverHandle.y = newY;
       this._leverHighlight.y = newY;
 
-      this._chargeBarFill.scaleY = ratio;
+      this._chargeBarFill.scaleY = curveLaunchPower(ratio);
       this.emitToGameScene('spring_charge', ratio);
       if (ratio === 1) {
         this.setStatusText('MAX POWER!', '#ff2200');
@@ -129,6 +175,20 @@ export class UIScene extends Phaser.Scene {
         align: 'center',
       })
       .setOrigin(0.5);
+
+    this._pointsText = this.add
+      .text(70, 130, 'PT 000', {
+        fontFamily: '"Press Start 2P"',
+        fontSize: '10px',
+        color: '#ffb300',
+      })
+      .setOrigin(0.5);
+
+    this._energyLeds = [];
+    for (let i = 0; i < ENERGY_MAX; i++) {
+      const led = this.add.image(300 + i * 16, 132, 'led_unlit');
+      this._energyLeds.push(led);
+    }
 
     // Multiplier LEDs (placeholder unlit)
     const mults = [2, 4, 6, 8, 10];
@@ -220,33 +280,83 @@ export class UIScene extends Phaser.Scene {
         this.setStatusText('HOLD LEVER / RAISE?', '#ffb300');
         this.updateBetChipState();
 
-        this._roundData = rollRound();
-
-        this.emitToGameScene('prepare_ball', this._roundData);
-
-        if (this._potentialWinText) {
-          this._potentialWinText.setText(
-            `BET x MULT\n${this._betAmount} x ${this._roundData.multiplier} = ${
-              this._betAmount * this._roundData.multiplier
-            }`
-          );
-        }
-
-        // Update multiplier LEDs
-        const mults = [2, 4, 6, 8, 10];
-        const ledIndex = mults.indexOf(this._roundData.multiplier);
-        this._multiplierLEDs.forEach((led, i) => {
-          led.setTexture(i === ledIndex ? 'led_lit' : 'led_unlit');
-        });
-
-        // Tell GameScene to update the tunnel colors
-        this.emitToGameScene('ui_update_tunnels', this._roundData.winningTunnels);
+        this._roundData = this.buildRoundWithModifiers();
+        this.emitToGameScene('prepare_ball');
+        this.syncRoundDisplay();
       }
     }
   }
 
+  private buildRoundWithModifiers(): RoundResultData {
+    const base = resolveRound();
+    const state = getProgressionState();
+    const { round, usage } = applyInventoryModifiers(base, state.inventory);
+    updateInventory(consumeInventory(state.inventory, usage));
+    return round;
+  }
+
+  private refreshMetaHud(): void {
+    const state = getProgressionState();
+    this._pointsText?.setText(`PT ${state.points.toString().padStart(3, '0')}`);
+    this._energyLeds.forEach((led, i) => {
+      led.setTexture(i < state.energy ? 'led_lit' : 'led_unlit');
+    });
+    this._shopPanel?.refresh();
+  }
+
+  private syncRoundDisplay(): void {
+    if (!this._roundData) return;
+
+    if (this._potentialWinText) {
+      this._potentialWinText.setText(
+        `BET x MULT\n${this._betAmount} x ${this._roundData.multiplier} = ${
+          this._betAmount * this._roundData.multiplier
+        }`
+      );
+    }
+
+    const mults = [2, 4, 6, 8, 10];
+    const ledIndex = mults.indexOf(this._roundData.multiplier);
+    this._multiplierLEDs.forEach((led, i) => {
+      led.setTexture(i === ledIndex ? 'led_lit' : 'led_unlit');
+    });
+
+    this.emitToGameScene('ui_update_tunnels', this._roundData.winningTunnels);
+  }
+
+  private applyCheatRound(): void {
+    if (this._state !== 'betting') {
+      this.setStatusText('CHEAT: START A ROUND FIRST', '#ff0055');
+      return;
+    }
+    this._roundData = this.buildRoundWithModifiers();
+    this.syncRoundDisplay();
+    this.setStatusText(`CHEAT APPLIED ${this._roundData.multiplier}X`, '#ff0055');
+  }
+
+  private onToggleShop(): void {
+    if (this._travelLocked) return;
+    this._mapSelectContainer?.setVisible(false);
+    this._cheatPanel?.hide();
+    this._shopPanel?.toggle();
+    this.ensureUiOnTop();
+  }
+
+  private onToggleCheatPanel(): void {
+    if (this._travelLocked) return;
+    this._mapSelectContainer?.setVisible(false);
+    this._shopPanel?.hide();
+    this._cheatPanel?.toggle();
+    this.ensureUiOnTop();
+  }
+
   private onBetChip(amount: number): void {
-    if (this._state === 'betting') {
+    if (this._miniGameOverlay?.getPhase() === 'mash') {
+      this._miniGameOverlay.addInvest(amount);
+      return;
+    }
+
+    if (this._state === 'betting' && !this._isMiniGameRound) {
       if (this._credits >= amount) {
         this.updateCredits(this._credits - amount);
         this._betAmount += amount;
@@ -333,6 +443,8 @@ export class UIScene extends Phaser.Scene {
   }
 
   private onLeverDown(): void {
+    if (this._cheatPanel?.isVisible() || this._shopPanel?.isVisible()) return;
+    if (this._miniGameOverlay?.isActive()) return;
     if (this._state === 'betting' && !this._travelLocked) {
       this._state = 'charging';
       this._chargeStartTime = this.time.now;
@@ -343,7 +455,18 @@ export class UIScene extends Phaser.Scene {
   }
 
   private onLeverUp(): void {
-    if (this._state === 'charging' && !this._travelLocked) {
+    if (this._state === 'charging' && !this._travelLocked && this._roundData) {
+      if (this._isMiniGameRound) {
+        const stake = Math.min(this._betAmount, this._credits);
+        if (stake <= 0) {
+          this._state = 'betting';
+          this.setStatusText('NEED BEADS TO LAUNCH', '#ff4444');
+          return;
+        }
+        this._betAmount = stake;
+        this.updateCredits(this._credits - stake);
+      }
+
       this._state = 'in_flight';
       this.setStatusText('IN FLIGHT...', '#b0b8c8');
       this._chargeBarFill.scaleY = 0;
@@ -351,7 +474,8 @@ export class UIScene extends Phaser.Scene {
       this.updateBetChipState();
 
       const chargeDuration = this.time.now - this._chargeStartTime;
-      const power = Phaser.Math.Clamp(chargeDuration / 1500, 0.08, 1.0); // max 1.5s, min 8%
+      const rawPower = Phaser.Math.Clamp(chargeDuration / 1500, 0.08, 1.0);
+      const power = curveLaunchPower(rawPower);
 
       // Snap lever back
       this._leverHandle.y = this._leverBaseY;
@@ -371,7 +495,14 @@ export class UIScene extends Phaser.Scene {
   }
 
   private onRoundComplete(data: { isWin: boolean; multiplier: number; tunnelIndex: number }): void {
-    const payout = this._betAmount * data.multiplier;
+    const stake = this._betAmount;
+
+    if (this._isMiniGameRound) {
+      this.finishMiniGameRound(data.isWin, stake);
+      return;
+    }
+
+    const payout = stake * data.multiplier;
 
     this.setStatusText(
       data.isWin ? `WIN +${payout} BEADS` : 'NO WIN / TRY AGAIN',
@@ -379,17 +510,13 @@ export class UIScene extends Phaser.Scene {
     );
 
     if (data.isWin) {
-      // Calculate start position from tunnelIndex
       const slotWidth = 426 / 12;
       const tunnelX = 10 + data.tunnelIndex * slotWidth + slotWidth / 2;
       const tunnelY = 648 + 43;
-
-      // Create a visual bead that flies to the score
       const bead = this.add.image(tunnelX, tunnelY, 'ball');
       bead.setTint(0xffb300);
       bead.setBlendMode(Phaser.BlendModes.ADD);
 
-      // Add a cool arc using a path or just tween x and y
       this.tweens.add({
         targets: bead,
         x: 330,
@@ -400,6 +527,12 @@ export class UIScene extends Phaser.Scene {
           bead.destroy();
           this.sound.play('sfx_win');
           this.updateCredits(this._credits + payout);
+          const pts = calcPointsFromPayout(payout);
+          if (pts > 0) {
+            addPoints(pts);
+            this.showFloatText(`+${pts} PT`, 240, 90, '#ffb300');
+          }
+          this.refreshMetaHud();
           this.showFloatText(`+${payout} BEADS`, 330, 60, '#FFB300');
           this.playBeadWinFX();
           this.resetRoundState();
@@ -408,8 +541,57 @@ export class UIScene extends Phaser.Scene {
     } else {
       this.sound.play('sfx_lose');
       this.showFloatText('+0 BEADS', 330, 60, '#888ea0');
+      const { triggerMiniGame } = recordBeadLoss(stake);
+      this.refreshMetaHud();
+      if (triggerMiniGame) {
+        this._pendingMiniGame = true;
+      }
       this.time.delayedCall(600, () => this.resetRoundState());
     }
+  }
+
+  private finishMiniGameRound(isWin: boolean, stake: number): void {
+    this._isMiniGameRound = false;
+
+    if (isWin) {
+      this.setStatusText(`MINI WIN +${stake}`, '#ffb300');
+      this.sound.play('sfx_win');
+      this.updateCredits(this._credits + stake);
+      this.showFloatText(`+${stake} BEADS`, 330, 60, '#FFB300');
+      this.playBeadWinFX();
+    } else {
+      this.setStatusText('MINI LOST', '#b0b8c8');
+      this.sound.play('sfx_lose');
+      recordBeadLoss(stake);
+      this.refreshMetaHud();
+    }
+
+    this.time.delayedCall(600, () => this.resetRoundState());
+  }
+
+  private beginMiniGameBetting(invest: number): void {
+    this._isMiniGameRound = true;
+    this._betAmount = invest;
+    this._state = 'betting';
+    this._roundData = this.buildRoundWithModifiers();
+    this.emitToGameScene('prepare_ball');
+    this.syncRoundDisplay();
+
+    if (invest <= 0) {
+      this.setStatusText('INVEST BEADS / HOLD LEVER', '#ffb300');
+    } else {
+      this.setStatusText(`STAKE ${invest} / HOLD LEVER`, '#ffb300');
+    }
+    this.updateBetChipState();
+  }
+
+  private tryStartMiniGame(): void {
+    if (!this._pendingMiniGame) return;
+    this._pendingMiniGame = false;
+    if (!consumeEnergyForMiniGame()) return;
+    this.refreshMetaHud();
+    this._state = 'idle';
+    this._miniGameOverlay?.start();
   }
 
   private resetRoundState(autoInsert: boolean = true): void {
@@ -421,6 +603,7 @@ export class UIScene extends Phaser.Scene {
     this._betAmount = 0;
     this._roundData = undefined;
     this.updateBetChipState();
+    this.emitToGameScene('ui_update_tunnels', []);
 
     if (this._potentialWinText) {
       this._potentialWinText.setText('BET x MULT\n0 x 0 = 0');
@@ -433,9 +616,10 @@ export class UIScene extends Phaser.Scene {
 
     if (this._credits < 5) {
       this.showGameOver();
-    } else if (autoInsert) {
-      // Automatically "loop" and insert beads if the player has credits!
+    } else if (autoInsert && !this._pendingMiniGame) {
       this.onInsertBeads();
+    } else if (autoInsert) {
+      this.tryStartMiniGame();
     }
   }
 
@@ -458,9 +642,10 @@ export class UIScene extends Phaser.Scene {
   }
 
   private updateBetChipState(): void {
-    const canBet = this._state === 'betting' && !this._travelLocked;
+    const inMash = this._miniGameOverlay?.getPhase() === 'mash';
+    const canBet = (this._state === 'betting' && !this._travelLocked) || inMash;
     this._betChips.forEach((chip) => {
-      const enabled = canBet && this._credits >= chip.amount;
+      const enabled = canBet && (inMash || this._credits >= chip.amount);
       if (enabled) {
         chip.button.setInteractive({ cursor: 'pointer' });
         chip.button.setAlpha(1);

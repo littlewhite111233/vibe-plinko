@@ -83,6 +83,20 @@ export class PreloadScene extends Phaser.Scene {
     g.fillRect(5, 5, 2, 2); // pin highlight
     g.generateTexture('peg', 14, 14);
 
+    // 2b. Elastic washer (16x16) — first peg row bumper ring
+    g.clear();
+    g.fillStyle(0x1a1a2e, 0.8);
+    g.fillCircle(8, 9, 7);
+    g.fillStyle(0x7a1828);
+    g.fillCircle(8, 8, 7);
+    g.fillStyle(0x0a1628);
+    g.fillCircle(8, 8, 3);
+    g.lineStyle(2, 0xff3344);
+    g.strokeCircle(8, 8, 6);
+    g.fillStyle(0xff8899);
+    g.fillRect(5, 5, 2, 2);
+    g.generateTexture('peg_washer', 16, 16);
+
     // 3. Peg Bloom (32x32)
     g.clear();
     g.fillStyle(0xffffff, 0.4);

@@ -1,5 +1,10 @@
 import Phaser from 'phaser';
 import { RoundResultData } from '../rng/RoundResult';
+import {
+  ballBodyOptions,
+  computeLaunchVelocity,
+  FEEL,
+} from '../physics/FeelConfig';
 
 export class GameScene extends Phaser.Scene {
   private static readonly BASE_WIDTH = 480;
@@ -12,7 +17,8 @@ export class GameScene extends Phaser.Scene {
   private _lastStuckShakeTime: number = 0;
   private _ballLastMotion: Map<Phaser.Physics.Matter.Sprite, number> = new Map();
   private _settlingBalls: Set<Phaser.Physics.Matter.Sprite> = new Set();
-  private _currentRoundData: RoundResultData | undefined;
+  private _roundActive: boolean = false;
+  private _roundData: RoundResultData | undefined;
   private _pendingOutcome:
     | {
         isWin: boolean;
@@ -314,16 +320,31 @@ export class GameScene extends Phaser.Scene {
 
         // Skip rightmost pegs if they cross into shooter lane (436)
         if (px < 420) {
-          this.matter.add.image(px, py, 'peg', undefined, {
-            isStatic: true,
-            circleRadius: 5, // Slightly larger for more contact/rng
-            restitution: 0.05, // extremely low elasticity so ball doesn't bounce off
-            friction: 0.05,
-            label: 'peg', // Give it a label so we can identify collisions
-          });
+          this.addPegAt(px, py, r === 0);
         }
       }
     }
+  }
+
+  protected addPegAt(px: number, py: number, isWasherRow: boolean): void {
+    if (isWasherRow) {
+      this.matter.add.image(px, py, 'peg_washer', undefined, {
+        isStatic: true,
+        circleRadius: FEEL.washer.circleRadius,
+        restitution: FEEL.washer.restitution,
+        friction: FEEL.washer.friction,
+        label: 'peg_washer',
+      });
+      return;
+    }
+
+    this.matter.add.image(px, py, 'peg', undefined, {
+      isStatic: true,
+      circleRadius: FEEL.peg.circleRadius,
+      restitution: FEEL.peg.restitution,
+      friction: FEEL.peg.friction,
+      label: 'peg',
+    });
   }
 
   protected createTunnels() {
@@ -420,7 +441,8 @@ export class GameScene extends Phaser.Scene {
   public launchBall(power: number, roundData: RoundResultData, count: number = 1): void {
     this.sound.play('sfx_launch');
 
-    this._currentRoundData = roundData;
+    this._roundActive = true;
+    this._roundData = roundData;
     this._pendingOutcome = undefined;
 
     this.clearExtraBalls();
@@ -438,24 +460,16 @@ export class GameScene extends Phaser.Scene {
     const mainBody = this._ball?.body as MatterJS.BodyType | undefined;
     if (this._ball && mainBody && mainBody.isStatic) {
       this._ball.setPosition(spawnX, spawnY);
-      this.applyBallCenterOfGravity(this._ball, roundData);
     } else {
       if (this._ball) {
         this._ball.destroy();
       }
 
-      this._ball = this.matter.add.sprite(spawnX, spawnY, 'ball', undefined, {
-        circleRadius: 7, // Reduced from 10 to make hitbox smaller
-        restitution: 0.1, // Reduced to 0.1 to eliminate high bounces on pegs
-        friction: 0.001,
-        frictionAir: 0.005, // Slightly increased from 0.001 to bleed off speed continuously as it drops
-        label: 'ball',
-      });
+      this._ball = this.matter.add.sprite(spawnX, spawnY, 'ball', undefined, ballBodyOptions());
       // Prevent the ball from ever sleeping
       if (this._ball.body) {
         this.matter.body.set(this._ball.body as MatterJS.BodyType, 'sleepThreshold', -1);
       }
-      this.applyBallCenterOfGravity(this._ball, roundData);
     }
 
     this._ball.setStatic(false);
@@ -463,54 +477,36 @@ export class GameScene extends Phaser.Scene {
     this.applyBallCollisionGroup(this._ball, noBallCollision);
     this._activeBalls.add(this._ball);
 
-    const minVy = -25;
-    const maxVy = -45;
-    const vy = minVy + (maxVy - minVy) * power;
-
-    this._ball.setVelocity(0, vy);
+    const { vx, vy } = computeLaunchVelocity(power);
+    this._ball.setVelocity(vx, vy);
 
     const extraCount = Math.max(0, Math.floor(count) - 1);
     const spread = 12;
     for (let i = 0; i < extraCount; i++) {
       const offsetX = (i - (extraCount - 1) / 2) * (spread / Math.max(1, extraCount));
-      const extra = this.matter.add.sprite(spawnX + offsetX, spawnY, 'ball', undefined, {
-        circleRadius: 7,
-        restitution: 0.1,
-        friction: 0.001,
-        frictionAir: 0.005,
-        label: 'ball',
-      });
+      const extra = this.matter.add.sprite(spawnX + offsetX, spawnY, 'ball', undefined, ballBodyOptions());
       if (extra.body) {
         this.matter.body.set(extra.body as MatterJS.BodyType, 'sleepThreshold', -1);
       }
-      this.applyBallCenterOfGravity(extra, roundData);
       this.applyBallCollisionGroup(extra, noBallCollision);
-      extra.setVelocity(0, vy);
+      extra.setVelocity(vx, vy);
       this._extraBalls.push(extra);
       this._activeBalls.add(extra);
     }
   }
 
-  public prepareBall(roundData?: RoundResultData): void {
+  public prepareBall(): void {
     this.clearAllBalls();
 
     const spawnX = this._springX;
     const compressionPixels = 14 * this._springCompression;
     const spawnY = this._springTop - 8 + compressionPixels;
 
-    this._ball = this.matter.add.sprite(spawnX, spawnY, 'ball', undefined, {
-      circleRadius: 7,
-      restitution: 0.1,
-      friction: 0.001,
-      frictionAir: 0.005,
-      label: 'ball',
-    });
+    this._ball = this.matter.add.sprite(spawnX, spawnY, 'ball', undefined, ballBodyOptions());
 
     if (this._ball.body) {
       this.matter.body.set(this._ball.body as MatterJS.BodyType, 'sleepThreshold', -1);
     }
-    this.applyBallCenterOfGravity(this._ball, roundData);
-
     this._ball.setStatic(true);
     this._ball.setIgnoreGravity(true);
     this.applyBallCollisionGroup(this._ball, false);
@@ -519,24 +515,6 @@ export class GameScene extends Phaser.Scene {
   public setSpringCompression(ratio: number): void {
     this._springCompression = Phaser.Math.Clamp(ratio, 0, 1);
     this.drawSpring();
-  }
-
-  private applyBallCenterOfGravity(
-    ball: Phaser.Physics.Matter.Sprite,
-    roundData?: RoundResultData
-  ): void {
-    const body = ball.body as MatterJS.BodyType | undefined;
-    if (!body) return;
-
-    const targetTunnel = roundData?.winningTunnels[0];
-    if (targetTunnel === undefined) return;
-
-    const clampedTunnel = Phaser.Math.Clamp(targetTunnel, 0, 11);
-    const ratio = clampedTunnel / 11;
-    const maxOffset = 2;
-    const offsetX = Math.round(Phaser.Math.Linear(-maxOffset, maxOffset, ratio));
-
-    this.matter.body.setCentre(body, { x: offsetX, y: 0 }, true);
   }
 
   protected drawSpring(): void {
@@ -573,7 +551,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private checkTunnelCollision(bodyA: MatterJS.BodyType, bodyB: MatterJS.BodyType): void {
-    if (!this._currentRoundData) return;
+    if (!this._roundActive) return;
 
     const ball = this.getActiveBall(bodyA, bodyB);
     if (!ball) return;
@@ -614,49 +592,55 @@ export class GameScene extends Phaser.Scene {
 
     const pegBody = isBallA ? bodyB : bodyA;
 
-    if (pegBody.label === 'peg' && pegBody.gameObject) {
-      this.triggerPegBloom(pegBody.gameObject as Phaser.Physics.Matter.Image);
+    if (
+      (pegBody.label === 'peg' || pegBody.label === 'peg_washer') &&
+      pegBody.gameObject
+    ) {
+      this.triggerPegBloom(
+        pegBody.gameObject as Phaser.Physics.Matter.Image,
+        pegBody.label === 'peg_washer'
+      );
     }
   }
 
-  protected triggerPegBloom(pegImage: Phaser.Physics.Matter.Image): void {
-    this.sound.play('sfx_peg', { volume: 0.5 });
+  protected triggerPegBloom(pegImage: Phaser.Physics.Matter.Image, isWasher = false): void {
+    this.sound.play('sfx_peg', { volume: isWasher ? 0.65 : 0.5 });
 
-    // 1. Create a bloom sprite exactly over the peg
-    const bloom = this.add.sprite(pegImage.x, pegImage.y - 2, 'peg_bloom'); // shift up slightly to center over the ball part of the peg
+    const bloom = this.add.sprite(pegImage.x, pegImage.y - 2, 'peg_bloom');
     bloom.setBlendMode(Phaser.BlendModes.ADD);
 
-    // Pick a random vibrant color from the palette
-    const colors = [0xffb300, 0x00d9ff, 0xff0055, 0x00ff88, 0xbf00ff];
+    const colors = isWasher
+      ? [0xff3344, 0xff6677, 0xffb300]
+      : [0xffb300, 0x00d9ff, 0xff0055, 0x00ff88, 0xbf00ff];
     const tint = colors[Math.floor(Math.random() * colors.length)];
     if (tint !== undefined) bloom.setTint(tint);
 
-    // 2. Animate it scaling up and fading out
     this.tweens.add({
       targets: bloom,
-      scale: 1.5,
+      scale: isWasher ? 1.8 : 1.5,
       alpha: 0,
-      duration: 300,
+      duration: isWasher ? 260 : 300,
       ease: 'Power2',
       onComplete: () => {
         bloom.destroy();
       },
     });
 
-    // 3. Very subtle camera shake to sell the impact
-    this.cameras.main.shake(100, 0.002);
+    this.cameras.main.shake(100, isWasher ? 0.004 : 0.002);
   }
 
   private handleTunnelEntry(ball: Phaser.Physics.Matter.Sprite, tunnelIndex: number): void {
-    if (!this._currentRoundData) return;
+    if (!this._roundActive) return;
     if (!this._activeBalls.has(ball)) return;
     if (this._settlingBalls.has(ball)) return;
     this._settlingBalls.add(ball);
 
     console.log('ROUND_COMPLETE_TUNNEL_ENTRY');
 
-    const isWin = this._currentRoundData.winningTunnels.includes(tunnelIndex);
-    const multiplier = isWin ? this._currentRoundData.multiplier : 0;
+    if (!this._roundData) return;
+
+    const isWin = this._roundData.winningTunnels.includes(tunnelIndex);
+    const multiplier = isWin ? this._roundData.multiplier : 0;
 
     if (!this._pendingOutcome) {
       this._pendingOutcome = { isWin, multiplier, tunnelIndex };
@@ -694,48 +678,41 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleBallMotion(ball: Phaser.Physics.Matter.Sprite, body: MatterJS.BodyType): void {
-    // 1. Strict Speed Limit (Clamp velocity to prevent tunneling and phantom energy launches)
-    // Set MAX_SPEED high enough to allow the full power launch (which is up to -45 vy)
-    const MAX_SPEED = 50;
+    const MAX_SPEED = FEEL.maxSpeed;
     const currentSpeed = Math.sqrt(body.velocity.x ** 2 + body.velocity.y ** 2);
     if (currentSpeed > MAX_SPEED) {
       const scale = MAX_SPEED / currentSpeed;
       ball.setVelocity(body.velocity.x * scale, body.velocity.y * scale);
     }
 
-    // Track motion time for debug/logging
-    if (currentSpeed > 0.2) {
+    if (currentSpeed > 0.15) {
       this._ballLastMotion.set(ball, this.time.now);
     }
 
-    if (!this._currentRoundData) return;
+    if (!this._roundActive) return;
 
-    // Debug: log if ball is stopped outside tunnels
-    const TUNNEL_Y = 648;
-    const TUNNEL_HEIGHT = 86;
-    if (currentSpeed < 0.05) {
-      const inTunnelBand = ball.y >= TUNNEL_Y && ball.y <= TUNNEL_Y + TUNNEL_HEIGHT;
-      if (!inTunnelBand && this.time.now - this._lastStopLogTime > 1000) {
-        console.log('DEBUG_BALL_STOPPED_OUTSIDE_TUNNEL', {
-          x: Math.round(ball.x),
-          y: Math.round(ball.y),
-          vx: Number(body.velocity.x.toFixed(3)),
-          vy: Number(body.velocity.y.toFixed(3)),
-        });
-        this._lastStopLogTime = this.time.now;
-      }
-    }
-
-    // Shake if ball is stuck outside tunnels
-    const inTunnelBand = ball.y >= TUNNEL_Y && ball.y <= TUNNEL_Y + TUNNEL_HEIGHT;
+    const inPegField = ball.y >= FEEL.pegFieldTop && ball.y < FEEL.tunnelY;
+    const inTunnelBand = ball.y >= FEEL.tunnelY && ball.y <= FEEL.tunnelY + 86;
     const lastMotion = this._ballLastMotion.get(ball) ?? this.time.now;
     const stuckTime = this.time.now - lastMotion;
-    if (!inTunnelBand && stuckTime > 1200 && this.time.now - this._lastStuckShakeTime > 1500) {
-      this.cameras.main.shake(180, 0.004);
-      const nudgeX = (Math.random() - 0.5) * 0.02;
-      const nudgeY = -0.01 - Math.random() * 0.01;
-      ball.applyForce(new Phaser.Math.Vector2(nudgeX, nudgeY));
+
+    if (inPegField && stuckTime > FEEL.stuckAfterMs && this.time.now - this._lastStuckShakeTime > 1200) {
+      this.cameras.main.shake(120, 0.003);
+      const nudgeVx = (Math.random() - 0.5) * 1.4;
+      const nudgeVy = 0.6 + Math.random() * 0.8;
+      ball.setVelocity(body.velocity.x * 0.15 + nudgeVx, nudgeVy);
       this._lastStuckShakeTime = this.time.now;
+      return;
+    }
+
+    if (currentSpeed < 0.05 && !inTunnelBand && this.time.now - this._lastStopLogTime > 1000) {
+      console.log('DEBUG_BALL_STOPPED_OUTSIDE_TUNNEL', {
+        x: Math.round(ball.x),
+        y: Math.round(ball.y),
+        vx: Number(body.velocity.x.toFixed(3)),
+        vy: Number(body.velocity.y.toFixed(3)),
+      });
+      this._lastStopLogTime = this.time.now;
     }
   }
 
@@ -755,7 +732,8 @@ export class GameScene extends Phaser.Scene {
 
     this.events.emit('round_complete', outcome);
 
-    this._currentRoundData = undefined;
+    this._roundActive = false;
+    this._roundData = undefined;
     this._pendingOutcome = undefined;
     this._settlingBalls.clear();
   }
@@ -787,7 +765,7 @@ export class GameScene extends Phaser.Scene {
       targets: ball,
       x: tunnelCenterX,
       y: settleY,
-      duration: 520,
+      duration: 420,
       ease: 'Sine.easeOut',
       onComplete: () => {
         ball.setVelocity(0, 0);

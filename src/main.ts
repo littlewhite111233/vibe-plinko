@@ -29,7 +29,9 @@ const config: Phaser.Types.Core.GameConfig = {
   physics: {
     default: 'matter',
     matter: {
-      gravity: { x: 0, y: 1.0 }, // Adjusted to give ball more weight so it drops through pegs reliably
+      gravity: { x: 0, y: 0.9 },
+      positionIterations: 8,
+      velocityIterations: 6,
       debug: isDebug,
     },
   },
