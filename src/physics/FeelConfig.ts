@@ -14,8 +14,8 @@ export const FEEL = {
   },
   washer: {
     circleRadius: 6,
-    restitution: 0.48,
-    friction: 0.015,
+    restitution: 0.68,
+    friction: 0.01,
   },
   launch: {
     maxVy: -44,
@@ -35,10 +35,22 @@ export const FEEL = {
   tunnelY: 648,
   /** Shooter-lane divider — pegs must leave this much air for the ball. */
   laneGuideX: 436,
+  playfieldLeftX: 10,
   laneWallClearance: 22,
+  leftWallClearance: 22,
 } as const;
 
 export const LANE_GUIDE_X = FEEL.laneGuideX;
+export const PLAYFIELD_LEFT_X = FEEL.playfieldLeftX;
+
+/** Keep pegs out of the left rail crevice where the ball wedges. */
+export function pegClearsLeftWall(
+  px: number,
+  pegRadius: number,
+  clearance: number = FEEL.leftWallClearance
+): boolean {
+  return px - pegRadius - FEEL.ball.circleRadius - clearance > FEEL.playfieldLeftX;
+}
 
 /** Keep pegs out of the peg/lane crevice where the ball wedges. */
 export function pegClearsLaneWall(
@@ -47,6 +59,10 @@ export function pegClearsLaneWall(
   clearance: number = FEEL.laneWallClearance
 ): boolean {
   return px + pegRadius + FEEL.ball.circleRadius + clearance < LANE_GUIDE_X;
+}
+
+export function pegFitsInField(px: number, pegRadius: number): boolean {
+  return pegClearsLeftWall(px, pegRadius) && pegClearsLaneWall(px, pegRadius);
 }
 
 export function curveLaunchPower(raw: number): number {

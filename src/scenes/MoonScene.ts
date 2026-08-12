@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { FEEL, LANE_GUIDE_X, pegClearsLaneWall } from '../physics/FeelConfig';
+import { FEEL, LANE_GUIDE_X, pegFitsInField } from '../physics/FeelConfig';
 import { GameScene } from './GameScene';
 
 export class MoonScene extends GameScene {
@@ -65,6 +65,7 @@ export class MoonScene extends GameScene {
     this.matter.add.circle(LANE_GUIDE_X + 2, LANE_GUIDE_Y, 2, { isStatic: true, restitution: 0.4 });
 
     this.addLaneWallBumpers(LANE_GUIDE_Y);
+    this.addLeftWallBumpers();
 
     // Shooter Lane Spring
     this._springGraphics = this.add.graphics();
@@ -156,7 +157,7 @@ export class MoonScene extends GameScene {
         const py = PEG_FIELD_Y + 20 + r * ROW_SPACING;
 
         if (r === 0) {
-          if (pegClearsLaneWall(px, FEEL.washer.circleRadius)) {
+          if (pegFitsInField(px, FEEL.washer.circleRadius)) {
             this.addPegAt(px, py, true);
           }
           continue;
@@ -165,7 +166,7 @@ export class MoonScene extends GameScene {
         const isBigRock = rng.frac() < 0.2;
         const isRock = !isBigRock && rng.frac() < 0.3;
         const circleRadius = isBigRock ? 7 : 5;
-        if (!pegClearsLaneWall(px, circleRadius)) continue;
+        if (!pegFitsInField(px, circleRadius)) continue;
 
         const textureKey = isBigRock ? 'moon_rock_big' : isRock ? 'moon_rock' : 'peg';
         const label = isBigRock ? 'moon_rock_big' : isRock ? 'moon_rock' : 'peg';

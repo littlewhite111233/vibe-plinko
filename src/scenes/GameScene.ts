@@ -5,7 +5,8 @@ import {
   computeLaunchVelocity,
   FEEL,
   LANE_GUIDE_X,
-  pegClearsLaneWall,
+  pegFitsInField,
+  PLAYFIELD_LEFT_X,
 } from '../physics/FeelConfig';
 
 export class GameScene extends Phaser.Scene {
@@ -140,6 +141,7 @@ export class GameScene extends Phaser.Scene {
     this.matter.add.circle(LANE_GUIDE_X + 2, LANE_GUIDE_Y, 2, { isStatic: true, restitution: 0.4 });
 
     this.addLaneWallBumpers(LANE_GUIDE_Y);
+    this.addLeftWallBumpers();
 
     // Shooter Lane Spring
     this._springGraphics = this.add.graphics();
@@ -295,6 +297,16 @@ export class GameScene extends Phaser.Scene {
     this._astronaut.x = this._astronautBaseX;
   }
 
+  protected addLeftWallBumpers(): void {
+    for (let y = FEEL.pegFieldTop + 30; y <= FEEL.tunnelY - 20; y += 65) {
+      this.matter.add.circle(PLAYFIELD_LEFT_X + 5, y, 4, {
+        isStatic: true,
+        restitution: 0.35,
+        friction: 0.005,
+      });
+    }
+  }
+
   protected addLaneWallBumpers(laneGuideY: number): void {
     for (let y = laneGuideY + 30; y <= FEEL.tunnelY - 20; y += 65) {
       this.matter.add.circle(LANE_GUIDE_X - 5, y, 4, {
@@ -334,7 +346,7 @@ export class GameScene extends Phaser.Scene {
         const py = PEG_FIELD_Y + 20 + r * ROW_SPACING;
 
         const pegRadius = r === 0 ? FEEL.washer.circleRadius : FEEL.peg.circleRadius;
-        if (pegClearsLaneWall(px, pegRadius)) {
+        if (pegFitsInField(px, pegRadius)) {
           this.addPegAt(px, py, r === 0);
         }
       }
@@ -719,20 +731,24 @@ export class GameScene extends Phaser.Scene {
 
     if (!this._roundActive) return;
 
-    const inPegField = ball.y >= FEEL.pegFieldTop && ball.y < FEEL.tunnelY;
+    const inStuckZone =
+      ball.y >= FEEL.pegFieldTop && ball.y <= FEEL.tunnelY + 86 && !this._settlingBalls.has(ball);
     const inTunnelBand = ball.y >= FEEL.tunnelY && ball.y <= FEEL.tunnelY + 86;
     const lastMotion = this._ballLastMotion.get(ball) ?? this.time.now;
     const stuckTime = this.time.now - lastMotion;
 
-    if (inPegField && stuckTime > FEEL.stuckAfterMs && this.time.now - this._lastStuckShakeTime > 800) {
+    if (inStuckZone && stuckTime > FEEL.stuckAfterMs && this.time.now - this._lastStuckShakeTime > 800) {
       this.cameras.main.shake(120, 0.003);
+      const nearLeftWall = ball.x < PLAYFIELD_LEFT_X + 46;
       const nearLaneWall = ball.x > LANE_GUIDE_X - 60;
-      const nudgeVx = nearLaneWall
-        ? -2.8 - Math.random() * 1.2
-        : (Math.random() - 0.5) * 2.0;
+      let nudgeVx = (Math.random() - 0.5) * 2.0;
       const nudgeVy = 1.0 + Math.random() * 1.2;
-      if (nearLaneWall) {
+      if (nearLeftWall) {
+        ball.setPosition(PLAYFIELD_LEFT_X + FEEL.ball.circleRadius + 10, ball.y);
+        nudgeVx = 2.8 + Math.random() * 1.2;
+      } else if (nearLaneWall) {
         ball.setPosition(LANE_GUIDE_X - FEEL.ball.circleRadius - 10, ball.y);
+        nudgeVx = -2.8 - Math.random() * 1.2;
       }
       ball.setVelocity(nudgeVx, nudgeVy);
       this._ballLastMotion.set(ball, this.time.now);

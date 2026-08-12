@@ -5,6 +5,8 @@ import {
   curveLaunchPower,
   FEEL,
   pegClearsLaneWall,
+  pegClearsLeftWall,
+  pegFitsInField,
 } from './FeelConfig';
 
 describe('curveLaunchPower', () => {
@@ -46,5 +48,20 @@ describe('pegClearsLaneWall', () => {
   it('rejects right-column pegs that wedge against the lane divider', () => {
     expect(pegClearsLaneWall(412, FEEL.washer.circleRadius)).toBe(false);
     expect(pegClearsLaneWall(388, FEEL.peg.circleRadius)).toBe(true);
+  });
+});
+
+describe('pegClearsLeftWall', () => {
+  it('rejects left-column pegs that wedge against the left rail', () => {
+    expect(pegClearsLeftWall(28, FEEL.washer.circleRadius)).toBe(false);
+    expect(pegClearsLeftWall(52, FEEL.peg.circleRadius)).toBe(true);
+  });
+});
+
+describe('pegFitsInField', () => {
+  it('requires clearance on both sides', () => {
+    expect(pegFitsInField(28, FEEL.washer.circleRadius)).toBe(false);
+    expect(pegFitsInField(412, FEEL.washer.circleRadius)).toBe(false);
+    expect(pegFitsInField(76, FEEL.peg.circleRadius)).toBe(true);
   });
 });
