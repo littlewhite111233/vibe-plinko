@@ -11,11 +11,12 @@ export class MiniGameOverlay {
   private _container?: Phaser.GameObjects.Container;
   private _titleText?: Phaser.GameObjects.Text;
   private _subText?: Phaser.GameObjects.Text;
+  private _investBtn?: Phaser.GameObjects.Container;
   private _phase: MiniGamePhase = 'idle';
   private _invest = 0;
   private _countdownTimer: Phaser.Time.TimerEvent | undefined;
   private _mashTimer: Phaser.Time.TimerEvent | undefined;
-  private _lastSpaceAt = 0;
+  private _lastTapAt = 0;
 
   constructor(
     private readonly _scene: Phaser.Scene,
@@ -49,15 +50,30 @@ export class MiniGameOverlay {
       .setOrigin(0.5);
     container.add(this._subText);
 
+    const investBg = this._scene.add.rectangle(240, 620, 220, 56, 0xff0055).setOrigin(0.5);
+    investBg.setStrokeStyle(3, 0xffb300);
+    investBg.setInteractive({ cursor: 'pointer' });
+    const investLabel = this._scene.add
+      .text(240, 620, '+1 INVEST', {
+        fontFamily: '"Press Start 2P"',
+        fontSize: '14px',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+    investBg.on('pointerdown', () => this.tapInvest());
+    this._investBtn = this._scene.add.container(0, 0, [investBg, investLabel]);
+    this._investBtn.setVisible(false);
+    container.add(this._investBtn);
+
     this._container = container;
   }
 
   bindKeyboard(): void {
-    this._scene.input.keyboard?.on('keydown-SPACE', this.onSpace, this);
+    this._scene.input.keyboard?.on('keydown-SPACE', this.tapInvest, this);
   }
 
   unbindKeyboard(): void {
-    this._scene.input.keyboard?.off('keydown-SPACE', this.onSpace, this);
+    this._scene.input.keyboard?.off('keydown-SPACE', this.tapInvest, this);
   }
 
   start(): void {
@@ -77,7 +93,7 @@ export class MiniGameOverlay {
         if (count > 0) {
           this.updateTexts('MINI GAME', `${count}...`);
         } else {
-          this.updateTexts('GO!', 'SPACE / CHIPS TO INVEST');
+          this.updateTexts('GO!', 'TAP +1 OR USE CHIPS');
           this.beginMashPhase();
         }
       },
@@ -86,6 +102,7 @@ export class MiniGameOverlay {
 
   private beginMashPhase(): void {
     this._phase = 'mash';
+    this._investBtn?.setVisible(true);
     let remaining = 10;
     this.updateMashText(remaining);
 
@@ -105,16 +122,17 @@ export class MiniGameOverlay {
 
   private finishMash(): void {
     this._phase = 'betting';
+    this._investBtn?.setVisible(false);
     this._container?.setVisible(false);
     this.clearTimers();
     this._callbacks.onMashDone(this._invest);
   }
 
-  private onSpace(): void {
+  tapInvest(): void {
     if (this._phase !== 'mash') return;
     const now = this._scene.time.now;
-    if (now - this._lastSpaceAt < 80) return;
-    this._lastSpaceAt = now;
+    if (now - this._lastTapAt < 80) return;
+    this._lastTapAt = now;
     this._invest += 1;
     this._callbacks.onSpacePress();
     this.updateMashText(this.getRemainingSeconds());
@@ -139,6 +157,7 @@ export class MiniGameOverlay {
   }
 
   hide(): void {
+    this._investBtn?.setVisible(false);
     this._container?.setVisible(false);
     this._phase = 'idle';
     this._invest = 0;
@@ -151,7 +170,7 @@ export class MiniGameOverlay {
   }
 
   private updateMashText(remaining: number): void {
-    this.updateTexts(`INVEST: ${this._invest}`, `${remaining}s LEFT\nSPACE / CHIPS`);
+    this.updateTexts(`INVEST: ${this._invest}`, `${remaining}s LEFT\nTAP +1 OR CHIPS`);
   }
 
   private updateTexts(title: string, sub: string): void {

@@ -13,6 +13,7 @@ import {
 } from '../meta/ProgressionStore';
 import { applyInventoryModifiers, consumeInventory } from '../meta/RoundModifiers';
 import { chargePullRatio, FEEL } from '../physics/FeelConfig';
+import { HudToolbar } from '../ui/HudToolbar';
 import { MiniGameOverlay } from '../ui/MiniGameOverlay';
 import { ShopPanel } from '../ui/ShopPanel';
 
@@ -48,6 +49,7 @@ export class UIScene extends Phaser.Scene {
   private _cheatPanel?: CheatPanel;
   private _shopPanel?: ShopPanel;
   private _miniGameOverlay?: MiniGameOverlay;
+  private _hudToolbar?: HudToolbar;
   private _pointsText!: Phaser.GameObjects.Text;
   private _energyLeds: Phaser.GameObjects.Image[] = [];
   private _isMiniGameRound = false;
@@ -71,6 +73,13 @@ export class UIScene extends Phaser.Scene {
     this.createBottomPanel();
     this.createOverlay();
     this.createMapSelect();
+
+    this._hudToolbar = new HudToolbar(this, {
+      onShop: () => this.onToggleShop(),
+      onMap: () => this.onToggleMap(),
+      onDebug: () => this.onToggleCheatPanel(),
+    });
+    this._hudToolbar.create();
 
     loadProgression();
 
@@ -108,6 +117,17 @@ export class UIScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-S', this.onToggleShop, this);
 
     this.refreshMetaHud();
+    this.refreshToolbarState();
+  }
+
+  private refreshToolbarState(): void {
+    const minigameActive = this._miniGameOverlay?.isActive() ?? false;
+    const enabled =
+      !this._travelLocked &&
+      !minigameActive &&
+      this._state !== 'in_flight' &&
+      this._state !== 'charging';
+    this._hudToolbar?.setEnabled(enabled);
   }
 
   override update(_time: number, _delta: number): void {
@@ -304,6 +324,7 @@ export class UIScene extends Phaser.Scene {
       led.setTexture(i < state.energy ? 'led_lit' : 'led_unlit');
     });
     this._shopPanel?.refresh();
+    this.refreshToolbarState();
   }
 
   private syncRoundDisplay(): void {
@@ -453,6 +474,7 @@ export class UIScene extends Phaser.Scene {
       this.setStatusText('CHARGING...', '#ffb300');
       this._chargeBarFill.fillColor = 0xffb300;
       this.updateBetChipState();
+      this.refreshToolbarState();
     }
   }
 
@@ -484,6 +506,7 @@ export class UIScene extends Phaser.Scene {
       this._state = 'in_flight';
       this.setStatusText('IN FLIGHT...', '#b0b8c8');
       this.updateBetChipState();
+      this.refreshToolbarState();
 
       const ballCount = this._debugMultiBall ? 10 : 1;
       this.emitToGameScene('launchBall', power, this._roundData, ballCount);
@@ -494,6 +517,7 @@ export class UIScene extends Phaser.Scene {
     if (this._state === 'in_flight') {
       this._state = 'betting';
       this.setStatusText('TRY AGAIN / HOLD LEVER', '#ffb300');
+      this.refreshToolbarState();
     }
   }
 
@@ -586,6 +610,7 @@ export class UIScene extends Phaser.Scene {
       this.setStatusText(`STAKE ${invest} / HOLD LEVER`, '#ffb300');
     }
     this.updateBetChipState();
+    this.refreshToolbarState();
   }
 
   private tryStartMiniGame(): void {
@@ -595,6 +620,7 @@ export class UIScene extends Phaser.Scene {
     this.refreshMetaHud();
     this._state = 'idle';
     this._miniGameOverlay?.start();
+    this.refreshToolbarState();
   }
 
   private resetRoundState(autoInsert: boolean = true): void {
@@ -624,6 +650,7 @@ export class UIScene extends Phaser.Scene {
     } else if (autoInsert) {
       this.tryStartMiniGame();
     }
+    this.refreshToolbarState();
   }
 
   private resetForMapSwitch(): void {
@@ -642,6 +669,7 @@ export class UIScene extends Phaser.Scene {
         }
       }
     });
+    this.refreshToolbarState();
   }
 
   private updateBetChipState(): void {
@@ -666,6 +694,7 @@ export class UIScene extends Phaser.Scene {
     this._state = 'idle';
     this.setStatusText('TRAVELING...', '#ffb300');
     this.updateBetChipState();
+    this.refreshToolbarState();
   }
 
   private onMapTravelComplete(): void {
@@ -803,6 +832,8 @@ export class UIScene extends Phaser.Scene {
     this._mapSelectContainer.setVisible(false);
 
     const bg = this.add.rectangle(0, 0, 480, 854, 0x000000, 0.6).setOrigin(0);
+    bg.setInteractive();
+    bg.on('pointerdown', () => this._mapSelectContainer?.setVisible(false));
     this._mapSelectContainer.add(bg);
 
     const panel = this.add.rectangle(240, 300, 320, 200, 0x1a1e2a).setOrigin(0.5);
@@ -842,7 +873,19 @@ export class UIScene extends Phaser.Scene {
     earthBtn.on('pointerdown', () => this.switchMap('GameScene'));
     moonBtn.on('pointerdown', () => this.switchMap('MoonScene'));
 
-    this._mapSelectContainer.add([title, earthBtn, earthText, moonBtn, moonText]);
+    const closeBtn = this.add.rectangle(240, 395, 140, 32, 0x3a3f50).setOrigin(0.5);
+    closeBtn.setStrokeStyle(2, 0xffb300);
+    closeBtn.setInteractive({ cursor: 'pointer' });
+    const closeText = this.add
+      .text(240, 395, 'CLOSE', {
+        fontFamily: '"Press Start 2P"',
+        fontSize: '10px',
+        color: '#b0b8c8',
+      })
+      .setOrigin(0.5);
+    closeBtn.on('pointerdown', () => this._mapSelectContainer?.setVisible(false));
+
+    this._mapSelectContainer.add([title, earthBtn, earthText, moonBtn, moonText, closeBtn, closeText]);
   }
 
   private applyViewport(): void {

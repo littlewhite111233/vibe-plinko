@@ -12,8 +12,11 @@ type ShopCallbacks = {
 
 export class ShopPanel {
   private _container?: Phaser.GameObjects.Container;
+  private _confirmContainer?: Phaser.GameObjects.Container;
+  private _confirmText?: Phaser.GameObjects.Text;
   private _inventoryLabel?: Phaser.GameObjects.Text;
   private _pointsLabel?: Phaser.GameObjects.Text;
+  private _pendingConfirm: (() => void) | undefined;
 
   constructor(
     private readonly _scene: Phaser.Scene,
@@ -61,10 +64,11 @@ export class ShopPanel {
       .setOrigin(0.5);
     container.add(this._inventoryLabel);
 
-    const items: Array<{ y: number; label: string; onBuy: () => void }> = [
+    const items: Array<{ y: number; label: string; confirm: string; onBuy: () => void }> = [
       {
         y: 270,
         label: '+1 LIGHT (20 PT)',
+        confirm: 'BUY +1 LIGHT\nFOR 20 PT?',
         onBuy: () => {
           if (!spendPoints(20)) return;
           addInventoryItem('extraLight');
@@ -74,6 +78,7 @@ export class ShopPanel {
       {
         y: 320,
         label: 'MULT x2 (30 PT)',
+        confirm: 'BUY MULT x2\nFOR 30 PT?',
         onBuy: () => {
           if (!spendPoints(30)) return;
           addInventoryItem('doubleMult');
@@ -83,7 +88,9 @@ export class ShopPanel {
     ];
 
     for (const item of items) {
-      const btn = this.makeButton(240, item.y, 280, 36, item.label, item.onBuy);
+      const btn = this.makeButton(240, item.y, 280, 36, item.label, () => {
+        this.askConfirm(item.confirm, item.onBuy);
+      });
       container.add([btn.bg, btn.label]);
     }
 
@@ -99,9 +106,11 @@ export class ShopPanel {
     for (const [idx, amount] of [1, 5, 10].entries()) {
       const x = 120 + idx * 120;
       const btn = this.makeButton(x, 400, 90, 28, `+${amount}`, () => {
-        if (!spendPoints(amount)) return;
-        this._callbacks.onBeadsPurchased(amount);
-        this.afterBuy();
+        this.askConfirm(`BUY +${amount} BEADS\nFOR ${amount} PT?`, () => {
+          if (!spendPoints(amount)) return;
+          this._callbacks.onBeadsPurchased(amount);
+          this.afterBuy();
+        });
       });
       container.add([btn.bg, btn.label]);
     }
@@ -109,8 +118,58 @@ export class ShopPanel {
     const closeBtn = this.makeButton(240, 460, 140, 32, 'CLOSE', () => this.hide());
     container.add([closeBtn.bg, closeBtn.label]);
 
+    this.createConfirmDialog(container);
+
     this._container = container;
     this.refresh();
+  }
+
+  private createConfirmDialog(parent: Phaser.GameObjects.Container): void {
+    const confirm = this._scene.add.container(0, 0);
+    confirm.setVisible(false);
+
+    const overlay = this._scene.add.rectangle(0, 0, 480, 854, 0x000000, 0.55).setOrigin(0);
+    overlay.setInteractive();
+    overlay.on('pointerdown', () => this.hideConfirm());
+    confirm.add(overlay);
+
+    const panel = this._scene.add.rectangle(240, 400, 320, 160, 0x1a1e2a).setOrigin(0.5);
+    panel.setStrokeStyle(3, 0xffb300);
+    confirm.add(panel);
+
+    this._confirmText = this._scene.add
+      .text(240, 365, '', {
+        fontFamily: '"Press Start 2P"',
+        fontSize: '10px',
+        color: '#b0b8c8',
+        align: 'center',
+      })
+      .setOrigin(0.5);
+    confirm.add(this._confirmText);
+
+    const yesBtn = this.makeButton(180, 430, 110, 32, 'YES', () => this.runConfirm());
+    const noBtn = this.makeButton(300, 430, 110, 32, 'NO', () => this.hideConfirm());
+    confirm.add([yesBtn.bg, yesBtn.label, noBtn.bg, noBtn.label]);
+
+    parent.add(confirm);
+    this._confirmContainer = confirm;
+  }
+
+  private askConfirm(message: string, onConfirm: () => void): void {
+    this._confirmText?.setText(message);
+    this._pendingConfirm = onConfirm;
+    this._confirmContainer?.setVisible(true);
+  }
+
+  private hideConfirm(): void {
+    this._confirmContainer?.setVisible(false);
+    this._pendingConfirm = undefined;
+  }
+
+  private runConfirm(): void {
+    const action = this._pendingConfirm;
+    this.hideConfirm();
+    action?.();
   }
 
   private afterBuy(): void {
@@ -147,6 +206,7 @@ export class ShopPanel {
   }
 
   hide(): void {
+    this.hideConfirm();
     this._container?.setVisible(false);
   }
 
